@@ -1,8 +1,10 @@
 """The NHR@FAU "LLMs as a Service" gateway: where it is, where the key is,
 which models it hosts. Standard library only."""
 
+import functools
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -22,6 +24,37 @@ DEFAULT_SMALL_MODEL = os.environ.get("DEFAULT_CLAUDE_FAU_SMALL_LLM", "google/gem
 
 # The listing tags embedding and OCR models with a `mode`; chat models carry none.
 _NON_CHAT_MODES = {"embedding", "ocr"}
+
+# The gateway's certificate chains to this root (valid to 2045). Mozilla's and
+# most Linux stores carry it; a fresh Windows does not. Windows downloads such
+# roots on demand for its own TLS clients, but Python only reads the Windows
+# store, so every urllib call failed with CERTIFICATE_VERIFY_FAILED (Windows 11
+# VM, 2026-10-05). Claude Code and OpenCode bring their own CA list.
+HARICA_TLS_ECC_ROOT_CA_2021 = """\
+-----BEGIN CERTIFICATE-----
+MIICVDCCAdugAwIBAgIQZ3SdjXfYO2rbIvT/WeK/zjAKBggqhkjOPQQDAzBsMQsw
+CQYDVQQGEwJHUjE3MDUGA1UECgwuSGVsbGVuaWMgQWNhZGVtaWMgYW5kIFJlc2Vh
+cmNoIEluc3RpdHV0aW9ucyBDQTEkMCIGA1UEAwwbSEFSSUNBIFRMUyBFQ0MgUm9v
+dCBDQSAyMDIxMB4XDTIxMDIxOTExMDExMFoXDTQ1MDIxMzExMDEwOVowbDELMAkG
+A1UEBhMCR1IxNzA1BgNVBAoMLkhlbGxlbmljIEFjYWRlbWljIGFuZCBSZXNlYXJj
+aCBJbnN0aXR1dGlvbnMgQ0ExJDAiBgNVBAMMG0hBUklDQSBUTFMgRUNDIFJvb3Qg
+Q0EgMjAyMTB2MBAGByqGSM49AgEGBSuBBAAiA2IABDgI/rGgltJ6rK9JOtDA4MM7
+KKrxcm1lAEeIhPyaJmuqS7psBAqIXhfyVYf8MLA04jRYVxqEU+kw2anylnTDUR9Y
+STHMmE5gEYd103KUkE+bECUqqHgtvpBBWJAVcqeht6NCMEAwDwYDVR0TAQH/BAUw
+AwEB/zAdBgNVHQ4EFgQUyRtTgRL+BNUW0aq8mm+3oJUZbsowDgYDVR0PAQH/BAQD
+AgGGMAoGCCqGSM49BAMDA2cAMGQCMBHervjcToiwqfAircJRQO9gcS3ujwLEXQNw
+SaSS6sUUiHCm0w2wqsosQJz76YJumgIwK0eaB8bRwoF8yguWGEEbo/QwCZ61IygN
+nxS2PFOiTAZpffpskcYqSUXm7LcT4Tps
+-----END CERTIFICATE-----
+"""
+
+
+@functools.lru_cache(maxsize=None)
+def ssl_context() -> ssl.SSLContext:
+    """The system trust store plus the gateway's root, for every gateway call."""
+    ctx = ssl.create_default_context()
+    ctx.load_verify_locations(cadata=HARICA_TLS_ECC_ROOT_CA_2021)
+    return ctx
 
 
 def key_from_file(path: Path) -> str:
@@ -76,7 +109,7 @@ def fetch_models(key: str, timeout: float = 15) -> list:
     """The gateway's /v1/models entries. Raises OSError or ValueError on failure."""
     req = urllib.request.Request(OPENAI_URL + "/models",
                                  headers={"authorization": f"Bearer {key}"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     models = payload.get("data") if isinstance(payload, dict) else payload
     if not isinstance(models, list):

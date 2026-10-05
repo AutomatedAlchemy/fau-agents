@@ -75,6 +75,12 @@ class ModelFilterTest(unittest.TestCase):
         self.assertFalse(gateway.BASE_URL.endswith("/v1"))
         self.assertTrue(gateway.OPENAI_URL.endswith("/v1"))
 
+    def test_ssl_context_trusts_the_gateway_root(self):
+        """A fresh Windows store lacks it; the context must carry it itself."""
+        names = [dict(rdn[0] for rdn in cert["subject"]).get("commonName")
+                 for cert in gateway.ssl_context().get_ca_certs()]
+        self.assertIn("HARICA TLS ECC Root CA 2021", names)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,28 +1,17 @@
 #!/usr/bin/env python3
-"""Local repair proxy for the NHR@FAU gateway's Anthropic-compatible stream.
+"""Local proxy between Claude Code and the NHR@FAU gateway, for `--capture`.
 
-The gateway serves `/v1/messages` in Anthropic shape, but its SSE translation
-does not track which content block is currently open. Observed on
-deepseek-ai/DeepSeek-V4-Flash:
+It runs only while capture is on. Each request goes on to the gateway, and the
+response comes back byte for byte. On the way, the parsed events go to
+capture.Trace, which writes the exchange as one JSONL record.
 
-    content_block_start  idx2  {"type": "text"}
-    content_block_delta  idx2  {"type": "thinking_delta"}   <-- wrong block
-    content_block_delta  idx2  {"type": "text_delta"}
-
-Claude Code registered block 2 as text, gets a thinking delta for it, and
-aborts the turn with `API Error: Content block is not a thinking block`. Same
-class of bug as claude-code-router#1378 / PR#1356 and LiteLLM#29441: the
-reasoning channel and the content channel are interleaved into one block.
-
-Non-streaming requests are unaffected, but Claude Code always streams, so the
-fix has to sit in the stream. This proxy re-derives each block's type from the
-deltas themselves — the deltas are the trustworthy part — and re-emits a clean
-block sequence: a delta whose type disagrees with the open block closes it and
-opens a correctly typed one. Blocks are renumbered so the indices stay dense
-and consecutive same-type deltas merge into one block.
-
-Everything else (message_start/delta/stop, ping, error, tool_use blocks and
-their input_json_delta) passes through untouched.
+Until 2026-10-05 this proxy also repaired the stream. The gateway's Anthropic
+translation opened a block as `text` and then sent `thinking_delta`s into it,
+and Claude Code aborted the turn with `API Error: Content block is not a
+thinking block` (8 of 10 turns on DeepSeek-V4-Flash at xhigh, 2026-08-18).
+Rechecks found 0 of 25 direct turns broken on 2026-08-24 and 0 of 10 Claude
+Code sessions on 2026-10-05, so the repair went. If the error comes back, the
+repair is in fauclaude/sse_repair.py at fau-agents 84edab9.
 """
 
 from __future__ import annotations
@@ -34,90 +23,6 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-# delta type -> the content block type that delta may legally appear in
-_DELTA_BLOCK_TYPE = {
-    "thinking_delta": "thinking",
-    "signature_delta": "thinking",
-    "text_delta": "text",
-    "input_json_delta": "tool_use",
-}
-
-_EMPTY_BLOCK = {
-    "thinking": {"type": "thinking", "thinking": "", "signature": None},
-    "text": {"type": "text", "text": ""},
-}
-
-
-def _event(payload: dict) -> bytes:
-    return (f"event: {payload['type']}\n"
-            f"data: {json.dumps(payload, separators=(',', ':'))}\n\n").encode("utf-8")
-
-
-def repair_events(events):
-    """Yield a protocol-clean event stream from the gateway's events.
-
-    Pure and synchronous so it can be tested without a socket: takes an
-    iterable of parsed event dicts, yields event dicts.
-    """
-    out_index = -1
-    open_type = None          # type of the block currently open downstream
-    passthrough_block = None  # upstream index of a tool_use block we forward as-is
-
-    def close():
-        nonlocal open_type
-        if open_type is not None:
-            yield {"type": "content_block_stop", "index": out_index}
-            open_type = None
-
-    for event in events:
-        etype = event.get("type")
-
-        if etype == "content_block_start":
-            block = event.get("content_block") or {}
-            if block.get("type") == "tool_use":
-                # Tool calls carry an id and a name we must not invent; forward
-                # the block verbatim, only renumbering it.
-                yield from close()
-                out_index += 1
-                open_type = "tool_use"
-                passthrough_block = event.get("index")
-                yield {**event, "index": out_index}
-            # Any other start is advisory: its declared type is exactly what the
-            # gateway gets wrong, so the deltas decide instead.
-            continue
-
-        if etype == "content_block_delta":
-            delta = event.get("delta") or {}
-            want = _DELTA_BLOCK_TYPE.get(delta.get("type"))
-            if want is None:
-                continue  # unknown delta kind: nothing safe to attach it to
-            if want == "tool_use":
-                if open_type == "tool_use" and event.get("index") == passthrough_block:
-                    yield {**event, "index": out_index}
-                continue
-            if want != open_type:
-                yield from close()
-                out_index += 1
-                open_type = want
-                yield {"type": "content_block_start", "index": out_index,
-                       "content_block": dict(_EMPTY_BLOCK[want])}
-            yield {**event, "index": out_index}
-            continue
-
-        if etype == "content_block_stop":
-            # Closing is driven by the next delta's type (so split blocks merge
-            # back together), except for tool_use which must close exactly.
-            if open_type == "tool_use" and event.get("index") == passthrough_block:
-                yield {"type": "content_block_stop", "index": out_index}
-                open_type = None
-                passthrough_block = None
-            continue
-
-        if etype in ("message_delta", "message_stop"):
-            yield from close()
-
-        yield event
 
 
 def parse_sse(lines):
@@ -135,22 +40,24 @@ def parse_sse(lines):
             continue
 
 
-def repair_sse(lines, on_event=None):
-    """Byte-level wrapper: SSE lines in, repaired SSE bytes out.
+def relay_sse(lines, on_event=None):
+    """The gateway's SSE lines, passed through unchanged.
 
-    `on_event` sees each repaired event before it is encoded — that is where
-    capture.Trace folds the assistant turn back together.
+    `on_event` sees each parsed event on the way. That is where capture.Trace
+    folds the assistant turn back together.
     """
-    for event in repair_events(parse_sse(lines)):
+    for raw in lines:
         if on_event is not None:
-            on_event(event)
-        yield _event(event)
+            for event in parse_sse([raw]):
+                on_event(event)
+        yield raw
 
 
 class _Handler(BaseHTTPRequestHandler):
     upstream = ""
     api_key = ""
     recorder = None  # capture.Recorder, or None when capture is off
+    context = None  # ssl.SSLContext for the gateway, or None for the default
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *_args):  # keep the launcher's stderr for the user
@@ -181,7 +88,7 @@ class _Handler(BaseHTTPRequestHandler):
                      "x-api-key": self.api_key,
                      "anthropic-version": self.headers.get("anthropic-version", "2023-06-01")})
         try:
-            resp = urllib.request.urlopen(req, timeout=900)
+            resp = urllib.request.urlopen(req, timeout=900, context=self.context)
         except urllib.error.HTTPError as err:  # forward the gateway's own errors
             payload = err.read()
             if trace:
@@ -223,7 +130,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("transfer-encoding", "chunked")
         self.end_headers()
         try:
-            for chunk in repair_sse(resp, on_event=trace.on_event if trace else None):
+            for chunk in relay_sse(resp, on_event=trace.on_event if trace else None):
                 self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
                 self.wfile.flush()
             self.wfile.write(b"0\r\n\r\n")
@@ -241,7 +148,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.upstream + self.path,
             headers={"authorization": f"Bearer {self.api_key}", "x-api-key": self.api_key})
         try:
-            resp = urllib.request.urlopen(req, timeout=60)
+            resp = urllib.request.urlopen(req, timeout=60, context=self.context)
             payload, status = resp.read(), resp.status
         except urllib.error.HTTPError as err:
             payload, status = err.read(), err.code
@@ -270,13 +177,14 @@ class _Server(ThreadingHTTPServer):
 
 
 def serve(upstream: str, api_key: str, host: str = "127.0.0.1", port: int = 0,
-          recorder=None):
+          recorder=None, context=None):
     """Start the proxy on a background thread. Returns (server, base_url).
 
     `recorder` is an optional capture.Recorder; every exchange is written to it.
+    `context` is the SSLContext for the gateway (gateway.ssl_context()).
     """
     handler = type("Handler", (_Handler,), {"upstream": upstream, "api_key": api_key,
-                                            "recorder": recorder})
+                                            "recorder": recorder, "context": context})
     server = _Server((host, port), handler)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()

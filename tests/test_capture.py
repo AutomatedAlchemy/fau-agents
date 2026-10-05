@@ -13,7 +13,7 @@ from pathlib import Path
 
 import _paths  # noqa: F401  (puts fauclaude/ on sys.path)
 import capture
-import sse_repair
+import proxy
 
 REQUEST = {
     "model": "deepseek-ai/DeepSeek-V4-Flash",
@@ -24,25 +24,27 @@ REQUEST = {
     "metadata": {"user_id": "should-not-be-recorded"},
 }
 
-# The gateway's broken shape: block 1 opens as text, then a thinking delta.
+# A thinking block, a text block and a tool call, the way the gateway streams them.
 UPSTREAM_EVENTS = [
     {"type": "message_start", "message": {"id": "msg_1", "model": "m",
                                           "usage": {"input_tokens": 12}}},
-    {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}},
     {"type": "content_block_delta", "index": 0,
      "delta": {"type": "thinking_delta", "thinking": "let me think"}},
-    {"type": "content_block_delta", "index": 0,
-     "delta": {"type": "text_delta", "text": "hello "}},
-    {"type": "content_block_delta", "index": 0,
-     "delta": {"type": "text_delta", "text": "there"}},
     {"type": "content_block_stop", "index": 0},
-    {"type": "content_block_start", "index": 1,
-     "content_block": {"type": "tool_use", "id": "tu_1", "name": "Bash"}},
+    {"type": "content_block_start", "index": 1, "content_block": {"type": "text"}},
     {"type": "content_block_delta", "index": 1,
-     "delta": {"type": "input_json_delta", "partial_json": '{"cmd":'}},
+     "delta": {"type": "text_delta", "text": "hello "}},
     {"type": "content_block_delta", "index": 1,
-     "delta": {"type": "input_json_delta", "partial_json": '"ls"}'}},
+     "delta": {"type": "text_delta", "text": "there"}},
     {"type": "content_block_stop", "index": 1},
+    {"type": "content_block_start", "index": 2,
+     "content_block": {"type": "tool_use", "id": "tu_1", "name": "Bash"}},
+    {"type": "content_block_delta", "index": 2,
+     "delta": {"type": "input_json_delta", "partial_json": '{"cmd":'}},
+    {"type": "content_block_delta", "index": 2,
+     "delta": {"type": "input_json_delta", "partial_json": '"ls"}'}},
+    {"type": "content_block_stop", "index": 2},
     {"type": "message_delta", "delta": {"stop_reason": "tool_use"},
      "usage": {"output_tokens": 34}},
     {"type": "message_stop"},
@@ -65,7 +67,7 @@ class TraceTest(unittest.TestCase):
     def _run_stream(self, events=UPSTREAM_EVENTS, request=REQUEST):
         trace = self.recorder.begin(json.dumps(request).encode(), stream=True)
         assert trace is not None
-        for event in sse_repair.repair_events(events):
+        for event in events:
             trace.on_event(event)
         trace.finish()
         return records_in(self.tmp.name)[-1]
@@ -106,7 +108,7 @@ class TraceTest(unittest.TestCase):
     def test_a_broken_turn_is_still_recorded(self):
         trace = self.recorder.begin(json.dumps(REQUEST).encode(), stream=True)
         assert trace is not None
-        for event in sse_repair.repair_events(UPSTREAM_EVENTS[:4]):
+        for event in UPSTREAM_EVENTS[:6]:
             trace.on_event(event)
         trace.fail("client disconnected")
         trace.finish()
@@ -153,7 +155,7 @@ class ProxyCaptureTest(unittest.TestCase):
         self.addCleanup(upstream.shutdown)
 
         recorder = capture.Recorder(Path(tmp.name))
-        server, base = sse_repair.serve(
+        server, base = proxy.serve(
             f"http://127.0.0.1:{upstream.socket.getsockname()[1]}", "key",
             recorder=recorder)
         self.addCleanup(server.shutdown)

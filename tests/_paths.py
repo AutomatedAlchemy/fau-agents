@@ -1,5 +1,5 @@
 """Import paths for the tests: the repo root (for fau_agents), fauclaude/ (for
-capture and sse_repair), and a loader for the two launchers, which are both
+capture and proxy), and a loader for the two launchers, which are both
 called main.py and so cannot both be imported as `main`."""
 
 import importlib.util

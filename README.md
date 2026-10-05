@@ -22,7 +22,6 @@ fauclaude --capture             # record exchanges from now on (remembered)
 fauclaude --no-capture          # stop recording (remembered)
 fauclaude --traces              # how much has been recorded, and whether capture is on
 fauclaude --shared-config       # use ~/.claude instead of the separate profile
-fauclaude --no-repair           # skip the stream repair proxy
 fauclaude -- --resume           # anything after -- (or any unknown flag) goes to claude
 
 fauopencode                     # launch the OpenCode TUI
@@ -102,25 +101,13 @@ seeded once from the real config with cosmetics and onboarding state only, never
 yours. Globally installed skills, MCP servers and session history live in
 `~/.claude` and do not appear here. `--shared-config` opts out.
 
-### The stream repair proxy
-
-The gateway serves `/v1/messages` in Anthropic shape, but its stream translation
-once mislabelled content blocks: a block announced as `text` received a
-`thinking_delta`, and Claude Code aborted the turn with
-
-    API Error: Content block is not a thinking block
-
-On DeepSeek-V4-Flash at `xhigh`, 8 of 10 turns failed direct and 0 of 10 through
-the proxy. A recheck on 2026-08-24 found 0 mislabelled blocks in 25 direct turns,
-so the gateway may have fixed it. The proxy stays as a precaution. It listens on
-127.0.0.1 and re-derives each block's type from its deltas. `--no-repair` talks to
-the gateway directly if you want to check again.
-
 ### Captured traces
 
 Capture is off until you run `fauclaude --capture`. The choice is stored in
-`~/.claude-fau/fau-agents.json` and holds until `--no-capture`. With capture on,
-every exchange through the proxy is appended to `~/.claude-fau/traces/<date>.jsonl`:
+`~/.claude-fau/fau-agents.json` and holds until `--no-capture`. Without capture,
+Claude Code talks to the gateway directly. With capture on, a proxy on 127.0.0.1
+passes each exchange through unchanged and appends it to
+`~/.claude-fau/traces/<date>.jsonl`:
 
 ```json
 {"ts": "...", "model": "...", "stream": true,
@@ -144,7 +131,6 @@ or the tool schemas.
 - Auth headers and `metadata.user_id` are never written. Everything else the
   session saw is, including file contents and paths. Treat the directory as being
   as sensitive as the projects you use it on. Nothing is uploaded.
-- Capture runs in the proxy, so `--no-repair` also means no capture.
 
 ### Auth details
 
@@ -152,6 +138,21 @@ The session gets `ANTHROPIC_AUTH_TOKEN` and an explicitly blank
 `ANTHROPIC_API_KEY`. Setting both makes Claude Code warn about ambiguous auth and
 can send the request down the API-key branch. The small/haiku model is pinned to
 `google/gemma-4-E4B-it` so background calls stay on the gateway.
+
+The gateway's certificate chains to the HARICA TLS ECC Root CA 2021. A fresh
+Windows does not have that root in its store, so the launchers bring it along for
+their own calls (model listing, capture proxy). Claude Code and OpenCode carry
+their own CA lists.
+
+### The old stream repair
+
+Until 2026-10-05 fauclaude always ran a proxy that repaired the gateway's stream.
+Its Anthropic translation opened a block as `text` and sent `thinking_delta`s into
+it, and Claude Code aborted the turn with `API Error: Content block is not a
+thinking block` (8 of 10 turns on DeepSeek-V4-Flash at `xhigh`, 2026-08-18).
+Rechecks found 0 of 25 direct turns broken on 2026-08-24 and 0 of 10 Claude Code
+sessions on 2026-10-05, so the repair was removed. It is in
+`fauclaude/sse_repair.py` at commit 84edab9 if the error comes back.
 
 ## fauopencode
 
@@ -164,8 +165,7 @@ names it (`{env:LLMAPI_KEY}`).
 
 - OpenCode also loads `~/.claude/skills` and `~/.agents/skills` by itself. Those
   global skills appear next to the staged ones.
-- There is no repair proxy and no capture. The stream bug was in the gateway's
-  Anthropic translation, and OpenCode talks to the OpenAI endpoint.
+- There is no capture. OpenCode talks to the gateway's OpenAI endpoint directly.
 - The output limit per model is capped at 32768 tokens. The gateway reports the
   full context size as the output limit, which would leave no room for the prompt.
 

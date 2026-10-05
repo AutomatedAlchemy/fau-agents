@@ -20,13 +20,11 @@ skills loaded for that session only.
    onboarding state). Global skills, MCP servers and session history are
    therefore not shared.
 
-4. **A repair proxy for the gateway's stream.** Its Anthropic-compatible SSE
-   has mislabelled content blocks, which aborts a turn with `API Error: Content
-   block is not a thinking block`. See `sse_repair`.
-
-5. **Optional capture.** The proxy sees both directions in full, so with
-   `--capture` it writes every exchange as JSONL under `~/.claude-fau/traces/`.
-   Off until turned on; the choice is remembered. See `capture`.
+4. **Optional capture.** With `--capture` a local proxy sits between Claude
+   Code and the gateway and writes every exchange as JSONL under
+   `~/.claude-fau/traces/`. Off until turned on; the choice is remembered.
+   Without capture Claude Code talks to the gateway directly. See `proxy` and
+   `capture`.
 
 `--profile` names the skill set: `~/.config/<profile>/skills` is read and the
 generated plugin carries that name. ww3claude is this launcher with
@@ -70,7 +68,7 @@ for _path in (str(SCRIPT_DIR), str(SCRIPT_DIR.parent)):
         sys.path.insert(0, _path)
 
 import capture  # noqa: E402
-import sse_repair  # noqa: E402
+import proxy  # noqa: E402
 from fau_agents import gateway, install, skills  # noqa: E402
 
 HOME = Path.home()
@@ -219,7 +217,7 @@ def build_argv(model: str, plugin: Path, passthrough: list) -> list:
 
 def launch(model: str, passthrough: list, *, profile: str = DEFAULT_PROFILE,
            extra=(), dry_run: bool = False, skip_models: bool = False,
-           repair: bool = True, isolated: bool = True, record: bool = False) -> int:
+           isolated: bool = True, record: bool = False) -> int:
     key = gateway.resolve_key()
     if not key:
         print(gateway.missing_key_message(profile), file=sys.stderr)
@@ -234,14 +232,11 @@ def launch(model: str, passthrough: list, *, profile: str = DEFAULT_PROFILE,
 
     base_url = gateway.BASE_URL
     server = None
-    if repair:
-        recorder = capture.Recorder() if record else None
-        server, base_url = sse_repair.serve(gateway.BASE_URL, key, recorder=recorder)
-        print(f"  -> stream repair proxy on {base_url}", file=sys.stderr)
-        if recorder:
-            print(f"  -> capturing exchanges to {recorder.dir}", file=sys.stderr)
-    elif record:
-        print("  -> capture off (--no-repair means no proxy to capture in)",
+    if record:
+        recorder = capture.Recorder()
+        server, base_url = proxy.serve(gateway.BASE_URL, key, recorder=recorder,
+                                       context=gateway.ssl_context())
+        print(f"  -> capturing exchanges to {recorder.dir} (proxy on {base_url})",
               file=sys.stderr)
     print(f"  -> starting Claude Code with: {model}", file=sys.stderr)
     print(file=sys.stderr)
@@ -311,9 +306,6 @@ def build_parser() -> argparse.ArgumentParser:
                                help="stop recording exchanges (remembered)")
     ap.add_argument("--traces", action="store_true",
                     help="show what has been captured so far, then exit")
-    ap.add_argument("--no-repair", action="store_true",
-                    help="talk to the gateway directly, without the stream "
-                         "repair proxy (and so without capture)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the claude invocation instead of running it")
     return ap
@@ -348,7 +340,7 @@ def main(argv=None) -> int:
         return 0
     return launch(known.model, passthrough, profile=known.profile,
                   extra=known.skill_root, dry_run=known.dry_run,
-                  skip_models=known.no_models, repair=not known.no_repair,
+                  skip_models=known.no_models,
                   isolated=not known.shared_config, record=capture_enabled())
 
 

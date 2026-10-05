@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Capture every exchange that passes through the repair proxy, as training data.
+"""Capture every exchange that passes through the proxy, as training data.
 
-The proxy already sits between Claude Code and the gateway and sees both
-directions in full, so it is the only place in this stack where a complete
+The proxy sits between Claude Code and the gateway and sees both directions
+in full, so it is the only place in this stack where a complete
 `(prompt, completion)` pair exists: the request body carries the system prompt,
-the whole message history and the tool schemas; the repaired event stream
-carries the assistant turn that answered it. Claude Code's own transcripts in
+the whole message history and the tool schemas; the event stream carries
+the assistant turn that answered it. Claude Code's own transcripts in
 `~/.claude-fau/projects/` are the *rendered* conversation, not the request —
 they do not contain the system prompt or the tool definitions, so they cannot
 be replayed as a fine-tuning sample.
@@ -76,11 +76,7 @@ class Trace:
     # --- streaming ---------------------------------------------------------
 
     def on_event(self, event: dict) -> None:
-        """Fold one *repaired* event into the assistant message being built.
-
-        Repaired, not raw, on purpose: those are the events Claude Code
-        actually consumed, so the captured turn is the one the session saw.
-        """
+        """Fold one streamed event into the assistant message being built."""
         etype = event.get("type")
         if etype == "message_start":
             message = event.get("message") or {}

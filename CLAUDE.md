@@ -9,13 +9,15 @@ user-facing behaviour; this file covers the layout and the rules for changing it
 
 - `fau_agents/` is shared code, imported by both launchers after they put the
   repo root on `sys.path`:
-  - `gateway.py`: URLs, default models, key lookup, the `/v1/models` listing.
+  - `gateway.py`: URLs, default models, key lookup, the `/v1/models` listing,
+    and `ssl_context()` with the gateway's root CA (a fresh Windows lacks it).
   - `skills.py`: skill roots per profile, discovery, `{{CLI}}` rendering, staging
     into `.staged/<agent>/<profile>/`.
   - `install.py`: `--install`/`--remove` through cli-tools-kit, plus the pointer
     file `~/.config/fau-agents/checkout` that ww3-agents uses to find this checkout.
-- `fauclaude/main.py`: launcher, config isolation, capture setting. `sse_repair.py`
-  is the stream repair proxy, `capture.py` the trace writer inside it.
+- `fauclaude/main.py`: launcher, config isolation, capture setting. `proxy.py`
+  is the local proxy that runs only while capture is on, `capture.py` the trace
+  writer inside it.
 - `fauopencode/main.py`: builds the OpenCode config and execs `opencode`.
 - `tests/`: stdlib unittest. `_paths.load(tool)` imports a launcher's `main.py`
   under a unique module name, since both are called `main.py`.

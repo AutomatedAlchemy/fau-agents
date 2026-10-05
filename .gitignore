@@ -1,0 +1,11 @@
+# Skills staged per launch (rebuilt every time)
+.staged/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Claude Code session-local state
+.claude/

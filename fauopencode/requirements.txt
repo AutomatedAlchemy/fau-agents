@@ -1,0 +1,2 @@
+# Standard library only. The launcher shells out to `opencode`; --install uses
+# cli-tools-kit, which the installer that runs it already has.

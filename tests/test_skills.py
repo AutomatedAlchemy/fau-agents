@@ -33,15 +33,15 @@ class DiscoveryTest(unittest.TestCase):
     def test_cli_placeholder_is_baked_to_tool_venv(self):
         rendered = {name: body for name, _s, body in skills.discover([self.root])}
         self.assertNotIn("{{CLI}}", rendered["xrdlab"])
-        self.assertIn(".venv/bin/python3", rendered["xrdlab"])
-        self.assertIn("xrdlab/main.py", rendered["xrdlab"])
+        self.assertIn(str(Path(".venv/bin/python3")), rendered["xrdlab"])
+        self.assertIn(str(Path("xrdlab/main.py")), rendered["xrdlab"])
 
     def test_tool_without_venv_falls_back_to_a_real_interpreter(self):
         rendered = {name: body for name, _s, body in skills.discover([self.root])}
         cli = rendered["plainly"].strip().splitlines()[-1]
         interp, script = shlex.split(cli)
         self.assertTrue(Path(interp).name.startswith("python"), cli)
-        self.assertTrue(script.endswith("plainly/main.py"), cli)
+        self.assertEqual(Path(script).parts[-2:], ("plainly", "main.py"), cli)
 
     def test_one_tool_repo_script_name(self):
         tool = self.root / "manim-kit"
@@ -49,7 +49,7 @@ class DiscoveryTest(unittest.TestCase):
         (tool / "manim_kit.py").write_text("")
         (tool / "SKILL.md").write_text("---\nname: manim-kit\n---\n{{CLI}}\n")
         rendered = {name: body for name, _s, body in skills.discover([self.root])}
-        self.assertIn("manim-kit/manim_kit.py", rendered["manim-kit"])
+        self.assertIn(str(Path("manim-kit/manim_kit.py")), rendered["manim-kit"])
 
     def test_name_falls_back_to_directory(self):
         tool = self.root / "nameless"

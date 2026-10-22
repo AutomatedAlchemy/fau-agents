@@ -58,7 +58,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(models[MODEL]["limit"], main.FALLBACK_LIMIT)
 
     def test_skills_point_at_the_staging_dir(self):
-        self.assertEqual(self.config()["skills"], {"paths": ["/staged"]})
+        self.assertEqual(self.config()["skills"], {"paths": [str(Path("/staged"))]})
 
     def test_config_is_valid_json_for_the_environment(self):
         env = main.launch_env("sk-x", self.config())
@@ -100,7 +100,8 @@ class LaunchTest(unittest.TestCase):
         exe, argv, env = execve.call_args.args
         self.assertEqual(argv, ["/bin/opencode", "run", "hi"])
         self.assertEqual(env["LLMAPI_KEY"], "sk-y")
-        self.assertIn(str(staged), env["OPENCODE_CONFIG_CONTENT"])
+        self.assertEqual(json.loads(env["OPENCODE_CONFIG_CONTENT"])["skills"]["paths"],
+                         [str(staged)])
 
     def test_advertise_metadata(self):
         self.assertEqual(main.PARENT_METADATA["alias"], "fauopencode")

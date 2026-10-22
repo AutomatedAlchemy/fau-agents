@@ -121,7 +121,7 @@ class ConfigIsolationTest(unittest.TestCase):
 
     def test_launch_env_points_claude_at_the_isolated_dir(self):
         env = main.launch_env("k", main.gateway.BASE_URL, Path("/somewhere/.claude-fau"))
-        self.assertEqual(env["CLAUDE_CONFIG_DIR"], "/somewhere/.claude-fau")
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], str(Path("/somewhere/.claude-fau")))
 
     def test_shared_config_leaves_the_variable_alone(self):
         with mock.patch.dict(os.environ, {}, clear=False):
@@ -163,7 +163,8 @@ class CaptureSettingTest(unittest.TestCase):
 class ArgvTest(unittest.TestCase):
     def test_plugin_dir_and_model_are_passed(self):
         argv = main.build_argv("some/model", Path("/p"), [])
-        self.assertEqual(argv[:5], ["claude", "--model", "some/model", "--plugin-dir", "/p"])
+        self.assertEqual(argv[:5], ["claude", "--model", "some/model", "--plugin-dir",
+                                    str(Path("/p"))])
 
     def test_unknown_flags_pass_through_to_claude(self):
         with mock.patch.object(main, "launch", return_value=0) as launch, \

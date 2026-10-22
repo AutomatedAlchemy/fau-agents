@@ -189,7 +189,10 @@ def save_key(key: str, path: Path = None) -> Path:
             break
     else:
         lines.append(f"LLMAPI_KEY={key}")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # O_BINARY: on Windows a text-mode descriptor would turn the "\r\n" that
+    # fdopen writes into "\r\r\n".
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0),
+                 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     os.chmod(path, 0o600)  # os.open leaves the mode of an existing file alone

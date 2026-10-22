@@ -211,6 +211,9 @@ def launch_env(key: str, base_url: str = gateway.BASE_URL, config_dir: Path = No
     env["ANTHROPIC_API_KEY"] = ""
     env["ANTHROPIC_SMALL_FAST_MODEL"] = gateway.DEFAULT_SMALL_MODEL
     env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = gateway.DEFAULT_SMALL_MODEL
+    # For tools inside the session, such as the faullm skill, which read the key
+    # from LLMAPI_KEY and do not know ~/.faullm_env.
+    env["LLMAPI_KEY"] = key
     if config_dir is not None:
         env["CLAUDE_CONFIG_DIR"] = str(config_dir)
     return env
@@ -224,9 +227,8 @@ def launch(model: str, passthrough: list, *, profile: str = DEFAULT_PROFILE,
            extra=(), dry_run: bool = False, skip_models: bool = False,
            isolated: bool = True, record: bool = False,
            vision_model: str = gateway.DEFAULT_VISION_MODEL) -> int:
-    key = gateway.resolve_key()
+    key = gateway.resolve_key() or gateway.ask_for_key(profile)
     if not key:
-        print(gateway.missing_key_message(profile), file=sys.stderr)
         return 1
     plugin, names = build_plugin(profile, extra)
     config_dir = ensure_config_dir() if isolated else None

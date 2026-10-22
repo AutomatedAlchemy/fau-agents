@@ -54,6 +54,11 @@ class LaunchEnvTest(unittest.TestCase):
         self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "sk-fau")
         self.assertEqual(env["ANTHROPIC_API_KEY"], "")
 
+    def test_session_tools_get_the_key(self):
+        """faullm inside the session reads LLMAPI_KEY, not ~/.faullm_env."""
+        with mock.patch.dict(os.environ, {"LLMAPI_KEY": ""}):
+            self.assertEqual(main.launch_env("sk-fau")["LLMAPI_KEY"], "sk-fau")
+
     def test_small_model_is_pinned_to_the_gateway(self):
         env = main.launch_env("k")
         self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], main.gateway.DEFAULT_SMALL_MODEL)
@@ -172,9 +177,11 @@ class ArgvTest(unittest.TestCase):
 
     def test_missing_key_fails_loudly_without_building(self):
         with mock.patch.object(main.gateway, "resolve_key", return_value=""), \
+                mock.patch.object(main.gateway, "ask_for_key", return_value="") as ask, \
                 mock.patch.object(main, "build_plugin") as build:
-            self.assertEqual(main.launch("m", []), 1)
+            self.assertEqual(main.launch("m", [], profile="ww3claude"), 1)
             build.assert_not_called()
+        ask.assert_called_once_with("ww3claude")
 
     def test_advertise_metadata_declares_no_skill(self):
         """The payload is session-scoped; a skill_name would install it globally."""

@@ -133,10 +133,8 @@ def stage_skills(profile: str, extra=(), root=None) -> tuple:
 
 def launch(model: str, small_model: str, passthrough: list, *,
            profile: str = DEFAULT_PROFILE, extra=(), dry_run: bool = False) -> int:
-    key = gateway.resolve_key()
+    key = gateway.resolve_key() or gateway.ask_for_key(profile.replace("claude", "opencode"))
     if not key:
-        print(gateway.missing_key_message(profile.replace("claude", "opencode")),
-              file=sys.stderr)
         return 1
     exe = find_opencode()
     if not exe and not dry_run:
@@ -216,9 +214,9 @@ def main(argv=None) -> int:
         skills.print_listing(roots, skills.discover(roots))
         return 0
     if known.models:
-        key = gateway.resolve_key()
+        key = (gateway.resolve_key()
+               or gateway.ask_for_key(known.profile.replace("claude", "opencode")))
         if not key:
-            print(gateway.missing_key_message("fauopencode"), file=sys.stderr)
             return 1
         return 0 if gateway.print_models(key, out=sys.stdout) else 1
     return launch(known.model, known.small_model, passthrough, profile=known.profile,

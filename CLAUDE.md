@@ -11,6 +11,9 @@ user-facing behaviour; this file covers the layout and the rules for changing it
   repo root on `sys.path`:
   - `gateway.py`: URLs, default models, key lookup, the `/v1/models` listing,
     and `ssl_context()` with the gateway's root CA (a fresh Windows lacks it).
+    `ask_for_key()` runs when no key is found: in a terminal it takes a pasted
+    key, checks it (401 = refused) and saves it to `~/.faullm_env`, or opens the
+    request form. It never prints the key.
   - `skills.py`: skill roots per profile, discovery, `{{CLI}}` rendering, staging
     into `.staged/<agent>/<profile>/`.
   - `install.py`: `--install`/`--remove` through cli-tools-kit, plus the pointer

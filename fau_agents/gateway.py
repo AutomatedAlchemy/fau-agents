@@ -1,13 +1,16 @@
 """The NHR@FAU "LLMs as a Service" gateway: where it is, where the key is,
-which models it hosts. Standard library only."""
+which models it hosts, and the prompt that asks for a key the first time.
+Standard library only."""
 
 import functools
+import getpass
 import json
 import os
 import ssl
 import sys
 import urllib.error
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 HOME = Path.home()
@@ -18,6 +21,9 @@ BASE_URL = "https://hub.nhr.fau.de/api/llmgw"
 # OpenAI shape, for OpenCode and the model listing.
 OPENAI_URL = BASE_URL + "/v1"
 KEY_REQUEST_URL = "https://hpc.fau.de/request-llm-api-key/"
+# The form further down that page. The anchor is the form's WordPress id; if
+# the page is rebuilt, the link still opens the page.
+KEY_FORM_URL = KEY_REQUEST_URL + "#wpcf7-f47025-p47027-o1"
 
 DEFAULT_MODEL = os.environ.get("DEFAULT_CLAUDE_FAU_LLM", "deepseek-ai/DeepSeek-V4-Flash-0731")
 DEFAULT_SMALL_MODEL = os.environ.get("DEFAULT_CLAUDE_FAU_SMALL_LLM", "google/gemma-4-E4B-it")
@@ -116,7 +122,7 @@ def resolve_key() -> str:
 def missing_key_message(prog: str) -> str:
     return (f"{prog}: no LLMAPI_KEY. Put LLMAPI_KEY=sk-... in ~/.faullm_env "
             f"(chmod 600) or export it.\n"
-            f"{' ' * len(prog)}  Request a key at {KEY_REQUEST_URL}")
+            f"{' ' * len(prog)}  Request a key at {KEY_FORM_URL}")
 
 
 def fetch_models(key: str, timeout: float = 15) -> list:
@@ -151,3 +157,100 @@ def print_models(key: str, out=sys.stderr) -> list:
         size = f"{context // 1024}k context" if isinstance(context, int) else ""
         print(f"  {m['id']:50s} {size}", file=out)
     return models
+
+
+# --- First run: no key yet -----------------------------------------------------
+
+def check_key(key: str):
+    """True if the gateway accepts the key, False if it refuses it (it answers a
+    wrong key with 401), None if the gateway could not be asked."""
+    try:
+        fetch_models(key)
+    except urllib.error.HTTPError as err:
+        return False if err.code in (401, 403) else None
+    except (OSError, ValueError):
+        return None
+    return True
+
+
+def save_key(key: str, path: Path = None) -> Path:
+    """Write `LLMAPI_KEY=<key>` into ~/.faullm_env with mode 600. An existing
+    LLMAPI_KEY line is replaced, every other line stays."""
+    path = Path(path or HOME / ".faullm_env")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        prefix = "export " if stripped.startswith("export ") else ""
+        if stripped[len(prefix):].lstrip().startswith("LLMAPI_KEY"):
+            lines[i] = f"{prefix}LLMAPI_KEY={key}"
+            break
+    else:
+        lines.append(f"LLMAPI_KEY={key}")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.chmod(path, 0o600)  # os.open leaves the mode of an existing file alone
+    return path
+
+
+def can_open_browser() -> bool:
+    """On a Linux host without a display, webbrowser falls back to a text
+    browser (lynx, w3m) that would take over this terminal."""
+    if os.name == "nt" or sys.platform == "darwin":
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def send_to_request_form(prog: str) -> None:
+    print(f"\nRequest a key with the form at\n  {KEY_FORM_URL}\n"
+          "Use your university email address. NHR only processes requests from those.\n"
+          "Under how you heard of the service, name your institute or chair:\n"
+          "\"by my supervisor\" alone is not enough. NHR approves each request\n"
+          f"by hand. When you have the key, start {prog} again and paste it.",
+          file=sys.stderr)
+    if can_open_browser():
+        try:
+            webbrowser.open(KEY_FORM_URL)
+        except webbrowser.Error:
+            pass
+
+
+def ask_for_key(prog: str) -> str:
+    """No key found. In a terminal, ask for one: a pasted key the gateway
+    accepts is saved to ~/.faullm_env, Enter alone opens the request form.
+    Returns the key, or "" when there is none (then the caller exits).
+    Without a terminal it prints missing_key_message and asks nothing."""
+    if sys.stdin is None or not sys.stdin.isatty():
+        print(missing_key_message(prog), file=sys.stderr)
+        return ""
+    print(f"{prog}: no LLMAPI_KEY found. The NHR@FAU LLM gateway needs a "
+          "personal key.", file=sys.stderr)
+    while True:
+        try:
+            key = getpass.getpass("Paste your key (the input stays hidden), or press "
+                                  "Enter to open the request form: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            return ""
+        if not key:
+            send_to_request_form(prog)
+            return ""
+        verdict = check_key(key)
+        if verdict is False:
+            print("The gateway refused this key. Check it and paste it again.",
+                  file=sys.stderr)
+            continue
+        if verdict is None:
+            print("  (the gateway could not be reached to check the key; saving it "
+                  "anyway)", file=sys.stderr)
+        try:
+            path = save_key(key)
+        except OSError as err:
+            print(f"  (could not save the key: {err}; it holds for this session only)",
+                  file=sys.stderr)
+        else:
+            print(f"Key saved to {path}.", file=sys.stderr)
+        return key

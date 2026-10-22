@@ -74,9 +74,11 @@ class LaunchTest(unittest.TestCase):
 
     def test_missing_key_fails_without_staging(self):
         with mock.patch.object(main.gateway, "resolve_key", return_value=""), \
+                mock.patch.object(main.gateway, "ask_for_key", return_value="") as ask, \
                 mock.patch.object(main, "stage_skills") as stage:
-            self.assertEqual(main.launch(MODEL, SMALL, []), 1)
+            self.assertEqual(main.launch(MODEL, SMALL, [], profile="ww3claude"), 1)
             stage.assert_not_called()
+        ask.assert_called_once_with("ww3opencode")
 
     def test_passthrough_reaches_opencode(self):
         with mock.patch.object(main, "launch", return_value=0) as launch:

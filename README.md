@@ -62,6 +62,15 @@ look in this order:
 
 A file holds one line, `LLMAPI_KEY=sk-...`. Keep it at mode 600 and out of git.
 
+When none of them has a key and the launcher runs in a terminal, it asks for
+one. A pasted key is checked against the gateway (a wrong key is refused with
+401 and asked for again) and saved to `~/.faullm_env` with mode 600. Other lines
+in that file stay. Enter alone opens the
+[request form](https://hpc.fau.de/request-llm-api-key/#wpcf7-f47025-p47027-o1) in
+the browser and says what it needs: a university email address and the institute.
+Without a terminal (a pipe, a script) the launcher prints where the key goes and
+exits with 1.
+
 ## Session-only skills
 
 A skill is a directory with a `SKILL.md` and an entry point. The launchers collect
@@ -160,7 +169,9 @@ or the tool schemas.
 The session gets `ANTHROPIC_AUTH_TOKEN` and an explicitly blank
 `ANTHROPIC_API_KEY`. Setting both makes Claude Code warn about ambiguous auth and
 can send the request down the API-key branch. The small/haiku model is pinned to
-`google/gemma-4-E4B-it` so background calls stay on the gateway.
+`google/gemma-4-E4B-it` so background calls stay on the gateway. The session also
+gets the key as `LLMAPI_KEY`, for tools inside it such as faullm, which do not
+read `~/.faullm_env`.
 
 The gateway's certificate chains to the HARICA TLS ECC Root CA 2021. A fresh
 Windows does not have that root in its store, so the launchers bring it along for

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Local proxy between Claude Code and the NHR@FAU gateway, for `--capture`.
+"""Local proxy between Claude Code and the NHR@FAU gateway.
 
-It runs only while capture is on. Each request goes on to the gateway, and the
-response comes back byte for byte. On the way, the parsed events go to
-capture.Trace, which writes the exchange as one JSONL record.
+It has two jobs, each optional:
+- vision.Describer turns images into text before a request reaches a model
+  that cannot read them.
+- With `--capture`, the parsed events go to capture.Trace, which writes the
+  exchange as one JSONL record.
+Either way the response comes back byte for byte.
 
 Until 2026-10-05 this proxy also repaired the stream. The gateway's Anthropic
 translation opened a block as `text` and then sent `thinking_delta`s into it,
@@ -57,6 +60,7 @@ class _Handler(BaseHTTPRequestHandler):
     upstream = ""
     api_key = ""
     recorder = None  # capture.Recorder, or None when capture is off
+    vision = None  # vision.Describer, or None to pass images through
     context = None  # ssl.SSLContext for the gateway, or None for the default
     protocol_version = "HTTP/1.1"
 
@@ -79,6 +83,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.vision:
+            body = self.vision.rewrite(body)
         trace = self.recorder.begin(body, stream=True) if self.recorder else None
         req = urllib.request.Request(
             self.upstream + self.path, data=body, method="POST",
@@ -177,14 +183,16 @@ class _Server(ThreadingHTTPServer):
 
 
 def serve(upstream: str, api_key: str, host: str = "127.0.0.1", port: int = 0,
-          recorder=None, context=None):
+          recorder=None, context=None, vision=None):
     """Start the proxy on a background thread. Returns (server, base_url).
 
     `recorder` is an optional capture.Recorder; every exchange is written to it.
     `context` is the SSLContext for the gateway (gateway.ssl_context()).
+    `vision` is an optional vision.Describer; it rewrites each request body.
     """
     handler = type("Handler", (_Handler,), {"upstream": upstream, "api_key": api_key,
-                                            "recorder": recorder, "context": context})
+                                            "recorder": recorder, "context": context,
+                                            "vision": vision})
     server = _Server((host, port), handler)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()

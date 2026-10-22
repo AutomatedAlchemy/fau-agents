@@ -20,6 +20,7 @@ fauclaude --list-skills         # which skills would be staged, and from where
 fauclaude --dry-run             # print the claude invocation instead of running it
 fauclaude --capture             # record exchanges from now on (remembered)
 fauclaude --no-capture          # stop recording (remembered)
+fauclaude --vision-model none   # send images to the model as they are (see Images)
 fauclaude --traces              # how much has been recorded, and whether capture is on
 fauclaude --shared-config       # use ~/.claude instead of the separate profile
 fauclaude -- --resume           # anything after -- (or any unknown flag) goes to claude
@@ -42,6 +43,11 @@ python3 fauopencode/main.py --install   # alias `fauopencode`
 
 `--install` needs [cli-tools-kit](https://pypi.org/project/cli-tools-kit/), which the
 installer already has. `--remove` takes the alias out again.
+
+OpenCode's install script is bash. On Windows, unzip `opencode-windows-x64.zip`
+from its [releases](https://github.com/anomalyco/opencode/releases) into
+`%USERPROFILE%\.opencode\bin`, where fauopencode looks for it, or run
+`npm install -g opencode-ai`.
 
 ## Key
 
@@ -101,12 +107,29 @@ seeded once from the real config with cosmetics and onboarding state only, never
 yours. Globally installed skills, MCP servers and session history live in
 `~/.claude` and do not appear here. `--shared-config` opts out.
 
+### Images
+
+Claude Code sends every image the agent opens (a PNG through Read, a pasted
+screenshot) to the model. Most gateway models cannot read images.
+DeepSeek-V4-Flash answers with HTTP 400, and since the image stays in the
+history, every later turn of the session fails too. gpt-oss-120b drops the image
+and answers as if it had seen it.
+
+So fauclaude runs a proxy on 127.0.0.1. When the session's model is not one of
+the vision models in `fau_agents/gateway.py`, the proxy replaces each image with
+a text block: a note that this model cannot see images, then a description
+written by `--vision-model` (default `Qwen/Qwen3.6-35B-A3B-FP8`, about 3 s per
+image). Each image is described once per session. If the description fails, the
+note says so and tells the model to work from the image's source data. A vision
+model as `--model` gets the image itself. `--vision-model none` turns the
+rewrite off; with capture also off, Claude Code then talks to the gateway
+directly.
+
 ### Captured traces
 
 Capture is off until you run `fauclaude --capture`. The choice is stored in
-`~/.claude-fau/fau-agents.json` and holds until `--no-capture`. Without capture,
-Claude Code talks to the gateway directly. With capture on, a proxy on 127.0.0.1
-passes each exchange through unchanged and appends it to
+`~/.claude-fau/fau-agents.json` and holds until `--no-capture`. With capture on,
+the proxy also appends each exchange, as the gateway saw it, to
 `~/.claude-fau/traces/<date>.jsonl`:
 
 ```json
@@ -141,12 +164,12 @@ can send the request down the API-key branch. The small/haiku model is pinned to
 
 The gateway's certificate chains to the HARICA TLS ECC Root CA 2021. A fresh
 Windows does not have that root in its store, so the launchers bring it along for
-their own calls (model listing, capture proxy). Claude Code and OpenCode carry
+their own calls (model listing, the local proxy). Claude Code and OpenCode carry
 their own CA lists.
 
 ### The old stream repair
 
-Until 2026-10-05 fauclaude always ran a proxy that repaired the gateway's stream.
+Until 2026-10-05 the proxy also repaired the gateway's stream.
 Its Anthropic translation opened a block as `text` and sent `thinking_delta`s into
 it, and Claude Code aborted the turn with `API Error: Content block is not a
 thinking block` (8 of 10 turns on DeepSeek-V4-Flash at `xhigh`, 2026-08-18).

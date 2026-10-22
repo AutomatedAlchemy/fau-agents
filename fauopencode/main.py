@@ -140,8 +140,16 @@ def launch(model: str, small_model: str, passthrough: list, *,
         return 1
     exe = find_opencode()
     if not exe and not dry_run:
-        print("opencode is not installed: see https://opencode.ai/docs/ "
-              "(curl -fsSL https://opencode.ai/install | bash)", file=sys.stderr)
+        if os.name == "nt":
+            # The install script is bash. The release zip holds one opencode.exe,
+            # and find_opencode() looks in .opencode\bin.
+            how = ("unzip opencode-windows-x64.zip from "
+                   "https://github.com/anomalyco/opencode/releases into "
+                   "%USERPROFILE%\\.opencode\\bin, or: npm install -g opencode-ai")
+        else:
+            how = "curl -fsSL https://opencode.ai/install | bash"
+        print(f"opencode is not installed: see https://opencode.ai/docs/ ({how})",
+              file=sys.stderr)
         return 1
     skills_dir, names = stage_skills(profile, extra)
     print(f"skills (this session only): {', '.join(names) or 'none found'}", file=sys.stderr)

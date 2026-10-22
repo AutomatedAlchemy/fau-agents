@@ -20,11 +20,15 @@ skills loaded for that session only.
    onboarding state). Global skills, MCP servers and session history are
    therefore not shared.
 
-4. **Optional capture.** With `--capture` a local proxy sits between Claude
-   Code and the gateway and writes every exchange as JSONL under
-   `~/.claude-fau/traces/`. Off until turned on; the choice is remembered.
-   Without capture Claude Code talks to the gateway directly. See `proxy` and
-   `capture`.
+4. **Images for text-only models.** A local proxy sits between Claude Code
+   and the gateway. When the session's model cannot read images (DeepSeek-V4-
+   Flash, the default, cannot), each image is replaced by a description from
+   `--vision-model`. `--vision-model none` turns this off. See `vision`.
+
+5. **Optional capture.** With `--capture` the same proxy writes every
+   exchange as JSONL under `~/.claude-fau/traces/`. Off until turned on; the
+   choice is remembered. With both off, Claude Code talks to the gateway
+   directly. See `proxy` and `capture`.
 
 `--profile` names the skill set: `~/.config/<profile>/skills` is read and the
 generated plugin carries that name. ww3claude is this launcher with
@@ -69,6 +73,7 @@ for _path in (str(SCRIPT_DIR), str(SCRIPT_DIR.parent)):
 
 import capture  # noqa: E402
 import proxy  # noqa: E402
+import vision  # noqa: E402
 from fau_agents import gateway, install, skills  # noqa: E402
 
 HOME = Path.home()
@@ -217,7 +222,8 @@ def build_argv(model: str, plugin: Path, passthrough: list) -> list:
 
 def launch(model: str, passthrough: list, *, profile: str = DEFAULT_PROFILE,
            extra=(), dry_run: bool = False, skip_models: bool = False,
-           isolated: bool = True, record: bool = False) -> int:
+           isolated: bool = True, record: bool = False,
+           vision_model: str = gateway.DEFAULT_VISION_MODEL) -> int:
     key = gateway.resolve_key()
     if not key:
         print(gateway.missing_key_message(profile), file=sys.stderr)
@@ -232,10 +238,19 @@ def launch(model: str, passthrough: list, *, profile: str = DEFAULT_PROFILE,
 
     base_url = gateway.BASE_URL
     server = None
-    if record:
-        recorder = capture.Recorder()
+    recorder = capture.Recorder() if record else None
+    describer = None
+    if vision_model:
+        describer = vision.Describer(key, vision_model, gateway.VISION_MODELS,
+                                     url=gateway.OPENAI_URL + "/chat/completions",
+                                     context=gateway.ssl_context())
+    if recorder or describer:
         server, base_url = proxy.serve(gateway.BASE_URL, key, recorder=recorder,
-                                       context=gateway.ssl_context())
+                                       context=gateway.ssl_context(), vision=describer)
+    if describer:
+        print(f"  -> {vision_model} describes images for models that cannot read them",
+              file=sys.stderr)
+    if recorder:
         print(f"  -> capturing exchanges to {recorder.dir} (proxy on {base_url})",
               file=sys.stderr)
     print(f"  -> starting Claude Code with: {model}", file=sys.stderr)
@@ -294,6 +309,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="rebuild the plugin directory, then exit")
     ap.add_argument("--no-models", action="store_true",
                     help="skip the gateway model listing")
+    ap.add_argument("--vision-model", default=gateway.DEFAULT_VISION_MODEL, metavar="MODEL",
+                    help="describes images for models that cannot read them "
+                         f"(default: {gateway.DEFAULT_VISION_MODEL}; 'none' passes "
+                         "images through unchanged)")
     ap.add_argument("--shared-config", action="store_true",
                     help="use the global ~/.claude config instead of the "
                          "isolated one (then /model writes your global default)")
@@ -341,7 +360,9 @@ def main(argv=None) -> int:
     return launch(known.model, passthrough, profile=known.profile,
                   extra=known.skill_root, dry_run=known.dry_run,
                   skip_models=known.no_models,
-                  isolated=not known.shared_config, record=capture_enabled())
+                  isolated=not known.shared_config, record=capture_enabled(),
+                  vision_model=None if known.vision_model.lower() == "none"
+                  else known.vision_model)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,20 @@ KEY_REQUEST_URL = "https://hpc.fau.de/request-llm-api-key/"
 DEFAULT_MODEL = os.environ.get("DEFAULT_CLAUDE_FAU_LLM", "deepseek-ai/DeepSeek-V4-Flash-0731")
 DEFAULT_SMALL_MODEL = os.environ.get("DEFAULT_CLAUDE_FAU_SMALL_LLM", "google/gemma-4-E4B-it")
 
+# Models that read images, probed on 2026-10-05; the listing has no vision flag.
+# For every other model fauclaude turns images into text (fauclaude/vision.py):
+# DeepSeek-V4-Flash answers an image with HTTP 400, gpt-oss-120b drops it silently.
+VISION_MODELS = frozenset({
+    "Qwen/Qwen3.6-35B-A3B-FP8",
+    "RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8",
+    "GaleneAI/Magistral-Small-2509-FP8-Dynamic",
+    "RedHatAI/gemma-4-31B-it-FP8-block",
+    "google/gemma-4-E4B-it",
+})
+# Writes those descriptions. On a Rietveld fit plot it was the fastest of the
+# five (2.5 s) and placed the peaks within half a degree.
+DEFAULT_VISION_MODEL = "Qwen/Qwen3.6-35B-A3B-FP8"
+
 # The listing tags embedding and OCR models with a `mode`; chat models carry none.
 _NON_CHAT_MODES = {"embedding", "ocr"}
 

@@ -16,8 +16,9 @@ user-facing behaviour; this file covers the layout and the rules for changing it
   - `install.py`: `--install`/`--remove` through cli-tools-kit, plus the pointer
     file `~/.config/fau-agents/checkout` that ww3-agents uses to find this checkout.
 - `fauclaude/main.py`: launcher, config isolation, capture setting. `proxy.py`
-  is the local proxy that runs only while capture is on, `capture.py` the trace
-  writer inside it.
+  is the local proxy. It runs unless both the image rewrite (`--vision-model none`)
+  and capture are off. `vision.py` turns images into text for models outside
+  `gateway.VISION_MODELS`, `capture.py` is the trace writer.
 - `fauopencode/main.py`: builds the OpenCode config and execs `opencode`.
 - `tests/`: stdlib unittest. `_paths.load(tool)` imports a launcher's `main.py`
   under a unique module name, since both are called `main.py`.

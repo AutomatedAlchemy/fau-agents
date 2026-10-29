@@ -44,5 +44,4 @@ user-facing behaviour; this file covers the layout and the rules for changing it
 
 ## Commits
 
-Public GitHub repo outside the Gitea zone: commit when asked, push only on
-instruction. Author is the GitHub noreply address.
+Public GitHub repo: commit when asked, push only on instruction. Author is the GitHub noreply address.

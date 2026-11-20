@@ -108,5 +108,38 @@ class LaunchTest(unittest.TestCase):
         self.assertNotIn("skill_name", main.PARENT_METADATA)
 
 
+class StandaloneTest(unittest.TestCase):
+    FLAG = "  --standalone   Run with a private server\n"
+    MENTION = "  --print-logs   Print logs (server logs require --standalone)\n"
+
+    def args(self, passthrough, shown=FLAG):
+        with mock.patch.object(main.subprocess, "run",
+                               return_value=mock.Mock(stdout=shown)) as run:
+            result = main.standalone_args("/bin/opencode", passthrough)
+        return result, run.call_args.args[0]
+
+    def test_tui_flags_follow_the_flag(self):
+        self.assertEqual(self.args(["-c"]),
+                         (["--standalone", "-c"], ["/bin/opencode", "--help"]))
+
+    def test_flag_follows_the_subcommand(self):
+        self.assertEqual(self.args(["run", "hi"]),
+                         (["run", "--standalone", "hi"], ["/bin/opencode", "run", "--help"]))
+
+    def test_directory_is_not_a_subcommand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.args([tmp]),
+                             (["--standalone", tmp], ["/bin/opencode", "--help"]))
+
+    def test_mention_in_other_help_text_does_not_count(self):
+        self.assertEqual(self.args(["auth"], self.MENTION)[0], ["auth"])
+
+    def test_unreadable_help_warns_and_keeps_the_arguments(self):
+        with mock.patch.object(main.subprocess, "run", side_effect=OSError("gone")), \
+                mock.patch("sys.stderr") as stderr:
+            self.assertEqual(main.standalone_args("/bin/opencode", ["run", "hi"]), ["run", "hi"])
+        self.assertTrue(stderr.write.called)
+
+
 if __name__ == "__main__":
     unittest.main()

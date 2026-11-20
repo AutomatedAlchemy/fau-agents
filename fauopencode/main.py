@@ -16,6 +16,9 @@ last and keeps for this process only:
 The key reaches OpenCode as `LLMAPI_KEY` in its environment; the config only
 names the variable. Your own `~/.config/opencode` stays untouched.
 
+OpenCode 2's background service ignores `OPENCODE_CONFIG_CONTENT`, so the launcher
+asks for a private server with `--standalone` wherever OpenCode accepts that flag.
+
 `--profile` names the skill set: `~/.config/<profile>/skills` is read, the same
 directory fauclaude reads. ww3opencode is this launcher with
 `--profile ww3claude`.
@@ -45,6 +48,7 @@ if "--advertise" in sys.argv:
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -64,6 +68,7 @@ PROVIDER = "fau"
 OUTPUT_CAP = 32768
 # Used when the listing fails or a model is missing from it.
 FALLBACK_LIMIT = {"context": 32768, "output": 8192}
+HELP_TIMEOUT_S = 15
 
 
 def find_opencode() -> str:
@@ -131,6 +136,26 @@ def stage_skills(profile: str, extra=(), root=None) -> tuple:
     return dest, skills.stage(dest, found)
 
 
+def standalone_args(exe: str, passthrough: list) -> list:
+    """`passthrough` with --standalone, placed right after the subcommand that
+    takes it. Versions and subcommands without the flag get `passthrough` as is:
+    the flag's name alone also appears in other flags' help text."""
+    is_subcommand = (passthrough and not passthrough[0].startswith("-")
+                     and not os.path.isdir(passthrough[0]))
+    sub = passthrough[:1] if is_subcommand else []
+    try:
+        shown = subprocess.run([exe, *sub, "--help"], stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, errors="replace",
+                               timeout=HELP_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"  warning: could not read opencode's help ({exc}); without --standalone "
+              "the session may not use the gateway", file=sys.stderr)
+        return passthrough
+    if not re.search(r"^\s*--standalone\b", shown.stdout, re.MULTILINE):
+        return passthrough
+    return [*sub, "--standalone", *passthrough[len(sub):]]
+
+
 def launch(model: str, small_model: str, passthrough: list, *,
            profile: str = DEFAULT_PROFILE, extra=(), dry_run: bool = False) -> int:
     key = gateway.resolve_key() or gateway.ask_for_key(profile.replace("claude", "opencode"))
@@ -162,7 +187,7 @@ def launch(model: str, small_model: str, passthrough: list, *,
     config = build_config(listing, model, small_model, skills_dir)
     print(f"  -> starting OpenCode with: {model}", file=sys.stderr)
 
-    argv = [exe or "opencode", *passthrough]
+    argv = [exe or "opencode", *(standalone_args(exe, passthrough) if exe else passthrough)]
     if dry_run:
         print(json.dumps(config, indent=2))
         print("[dry-run] would exec:", " ".join(argv))
